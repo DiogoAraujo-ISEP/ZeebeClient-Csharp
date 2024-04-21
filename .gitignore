@@ -1,0 +1,28 @@
+# Visual Studio files
+.vs/
+/bin/
+/obj/
+
+# User-specific files
+*.user
+*.suo
+*.cache
+*.vspscc
+*_i.c
+*_p.c
+*.ilk
+*.log
+*.dll
+*.exe
+
+# Packages
+packages/
+*.nupkg
+*.pfx
+*.snk
+
+# Miscellaneous
+Thumbs.db
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.sqlite
