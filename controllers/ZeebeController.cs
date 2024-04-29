@@ -22,7 +22,6 @@ namespace Controllers
             try
             {
                 var deploymentKey = await _zeebeService.DeployWorkflow(bpmnXmlRequest.BpmnXml);
-                Console.WriteLine("KEY: ", deploymentKey);
                 var processInstanceKey = await _zeebeService.StartWorkflowInstance(deploymentKey);
 
                 return Ok(new

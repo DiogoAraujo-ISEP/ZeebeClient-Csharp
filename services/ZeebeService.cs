@@ -1,6 +1,8 @@
 using System;
+using System.Net.Mail;
 using System.Text;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 using Zeebe.Client;
 using Zeebe.Client.Api.Responses;
 using Zeebe.Client.Api.Worker;
@@ -58,6 +60,8 @@ namespace Services
         public async void StartWorkers()
         {
             await Task.Run(CreateHelloWorker);
+            await Task.Run(CreateApprovalEmailWorker);
+            await Task.Run(CreateRejectionEmailWorker);
         }
 
         public void CreateHelloWorker(){
@@ -69,6 +73,74 @@ namespace Services
                 await client.NewCompleteJobCommand(job.Key).Send();
             });
         }
+
+        public void CreateApprovalEmailWorker()
+        {
+            CreateWorker("approval-email", async (client, job) =>
+            {
+
+                var data = JsonConvert.DeserializeObject<InterviewDataDTO>(job.Variables);
+
+                var email = data.Email;
+                var name = data.Name;
+                var subject = "Resposta entrevista emprego";
+                var body = "O/A senhor(a) " + name + " foi aceite!";
+
+                // Send email using the extracted variables
+                await SendEmail(email, subject, body);
+
+                // Complete the job
+                await client.NewCompleteJobCommand(job.Key)
+                    .Send();
+            });
+        }
+
+        public void CreateRejectionEmailWorker()
+        {
+            CreateWorker("rejection-email", async (client, job) =>
+            {
+                var data = JsonConvert.DeserializeObject<InterviewDataDTO>(job.Variables);
+
+                var email = data.Email;
+                var name = data.Name;
+                var subject = "Resposta entrevista emprego";
+                var body = "O/A senhor(a) " + name + " foi rejeitado!";
+
+                // Send email using the extracted variables
+                await SendEmail(email, subject, body);
+
+                // Complete the job
+                await client.NewCompleteJobCommand(job.Key)
+                    .Send();
+            });
+        }
+
+        private async Task SendEmail(string email, string subject, string body)
+        {
+            try
+            {
+
+                MailMessage message = new MailMessage();
+                message.From = new MailAddress("template41425352425@hotmail.com");
+                message.To.Add(email);
+                message.Subject = subject;
+                message.Body = body;
+
+                SmtpClient smtpClient = new SmtpClient("smtp-mail.outlook.com");
+                smtpClient.Port = 587; // Port number may vary
+                smtpClient.Credentials = new System.Net.NetworkCredential("template41425352425@hotmail.com", "test1423!");
+                smtpClient.EnableSsl = true; // Enable SSL if required by the SMTP server
+
+                await smtpClient.SendMailAsync(message);
+                Console.WriteLine("Email sent successfully.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Failed to send email: " + ex.Message);
+                // Handle exceptions
+            }
+        }
+
 
         public void CreateWorker(string jobType, JobHandler handleJob){
              _zeebeClient.NewWorker()
@@ -82,4 +154,16 @@ namespace Services
                        .Open();
         }
     }
+}
+
+public class InterviewDataDTO
+{
+    public string Name { get; set; }
+    public string Age { get; set; }
+    public string Email { get; set; }
+}
+
+public class AprovalDTO
+{
+    public string Aprovado { get; set; }
 }
