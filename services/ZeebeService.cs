@@ -21,7 +21,7 @@ namespace Services
     {
         private readonly IZeebeClient _zeebeClient;
 
-       public ProcessService(string clientId, string clientSecret, string clusterUrl)
+        public ProcessService(string clientId, string clientSecret, string clusterUrl)
         {
             _zeebeClient = CamundaCloudClientBuilder
                 .Builder()
@@ -36,7 +36,7 @@ namespace Services
             var encoding = Encoding.UTF8; // or any other encoding you prefer
             var bytes = encoding.GetBytes(bpmnFile);
             var deployResponse = await _zeebeClient.NewDeployCommand()
-                .AddResourceString(bpmnFile,encoding,"process.bpmn")
+                .AddResourceString(bpmnFile, encoding, "process.bpmn")
                 .Send();
             Console.WriteLine("Process Definition has been deployed!");
 
@@ -64,7 +64,9 @@ namespace Services
             await Task.Run(CreateRejectionEmailWorker);
         }
 
-        public void CreateHelloWorker(){
+        public void CreateHelloWorker()
+        {
+            Console.WriteLine("CREATED HELLO");
             CreateWorker("print-hello", async (client, job) =>
             {
                 Console.WriteLine("Working on Task");
@@ -76,42 +78,69 @@ namespace Services
 
         public void CreateApprovalEmailWorker()
         {
+            Console.WriteLine("CREATED APPROVAL EMAIL WORKER");
+
             CreateWorker("approval-email", async (client, job) =>
             {
+                try
+                {
+                    Console.WriteLine("APPROVAL EMAIL WORKER - STARTING JOB");
+                    var data = JsonConvert.DeserializeObject<InterviewDataDTO>(job.Variables);
 
-                var data = JsonConvert.DeserializeObject<InterviewDataDTO>(job.Variables);
+                    var email = data.Email;
+                    var name = data.Name;
+                    var subject = "Resposta entrevista emprego";
+                    var body = "O/A senhor(a) " + name + " foi aceite!";
 
-                var email = data.Email;
-                var name = data.Name;
-                var subject = "Resposta entrevista emprego";
-                var body = "O/A senhor(a) " + name + " foi aceite!";
+                    // Send email using the extracted variables
+                    await SendEmail(email, subject, body);
 
-                // Send email using the extracted variables
-                await SendEmail(email, subject, body);
+                    // Complete the job
+                    await client.NewCompleteJobCommand(job.Key)
+                        .Send();
+                    Console.WriteLine("APPROVAL EMAIL WORKER - JOB DONE");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to complete job with key {job.Key}: {ex.Message}");
+                }
 
-                // Complete the job
-                await client.NewCompleteJobCommand(job.Key)
-                    .Send();
             });
         }
 
         public void CreateRejectionEmailWorker()
         {
+            Console.WriteLine("CREATED REJECTION EMAIL WORKER");
+
             CreateWorker("rejection-email", async (client, job) =>
             {
-                var data = JsonConvert.DeserializeObject<InterviewDataDTO>(job.Variables);
+                try
+                {
 
-                var email = data.Email;
-                var name = data.Name;
-                var subject = "Resposta entrevista emprego";
-                var body = "O/A senhor(a) " + name + " foi rejeitado!";
+                    Console.WriteLine($"Job with key {job.Key}");
 
-                // Send email using the extracted variables
-                await SendEmail(email, subject, body);
 
-                // Complete the job
-                await client.NewCompleteJobCommand(job.Key)
-                    .Send();
+                    Console.WriteLine("REJECTION EMAIL WORKER - STARTING JOB");
+                    var data = JsonConvert.DeserializeObject<InterviewDataDTO>(job.Variables);
+
+                    var email = data.Email;
+                    var name = data.Name;
+                    var subject = "Resposta entrevista emprego";
+                    var body = "O/A senhor(a) " + name + " foi rejeitado!";
+
+                    // Send email using the extracted variables
+                    await SendEmail(email, subject, body);
+
+                    // Complete the job
+                    await client.NewCompleteJobCommand(job.Key)
+                        .Send();
+                    Console.WriteLine("REJECTION EMAIL WORKER - JOB DONE");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to complete job with key {job.Key}: {ex.Message}");
+                }
+
             });
         }
 
@@ -142,16 +171,18 @@ namespace Services
         }
 
 
-        public void CreateWorker(string jobType, JobHandler handleJob){
-             _zeebeClient.NewWorker()
-                       .JobType(jobType)
-                       .Handler(handleJob)
-                       .MaxJobsActive(5)
-                       .Name(Environment.MachineName)
-                       .AutoCompletion()
-                       .PollInterval(TimeSpan.FromSeconds(1))
-                       .Timeout(TimeSpan.FromSeconds(10))
-                       .Open();
+        public void CreateWorker(string jobType, JobHandler handleJob)
+        {
+            _zeebeClient.NewWorker()
+                      .JobType(jobType)
+                      .Handler(handleJob)
+                      .MaxJobsActive(1)
+                      .Name(Environment.MachineName)
+                      .AutoCompletion()
+                      .PollInterval(TimeSpan.FromSeconds(1))
+                      .PollingTimeout(TimeSpan.FromSeconds(1))
+                      .Timeout(TimeSpan.FromSeconds(1))
+                      .Open();
         }
     }
 }
