@@ -57,8 +57,9 @@ namespace YourNamespace
                 var clientId = zeebeSection.GetValue<string>("ClientId");
                 var clientSecret = zeebeSection.GetValue<string>("ClientSecret");
                 var clusterUrl = zeebeSection.GetValue<string>("ClusterUrl");
+                IDatabaseInfrastructure dbInfrastructure = new MockDatabaseInfrastructure();
 
-                return new ProcessService(clientId, clientSecret, clusterUrl);
+                return new ProcessService(clientId, clientSecret, clusterUrl, dbInfrastructure);
             });
         }
 

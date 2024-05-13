@@ -3,6 +3,7 @@ using System.Net.Mail;
 using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Zeebe.Client;
 using Zeebe.Client.Api.Responses;
 using Zeebe.Client.Api.Worker;
@@ -20,8 +21,9 @@ namespace Services
     public class ProcessService : IZeebeService
     {
         private readonly IZeebeClient _zeebeClient;
+        private readonly IDatabaseInfrastructure _dbInfrastructure;
 
-        public ProcessService(string clientId, string clientSecret, string clusterUrl)
+        public ProcessService(string clientId, string clientSecret, string clusterUrl, IDatabaseInfrastructure dbInfrastructure)
         {
             _zeebeClient = CamundaCloudClientBuilder
                 .Builder()
@@ -29,11 +31,17 @@ namespace Services
                 .UseClientSecret(clientSecret)
               .UseContactPoint(clusterUrl)
                 .Build();
+
+            _dbInfrastructure = dbInfrastructure;
+
+
+
+
         }
 
         public async Task<string> DeployWorkflow(string bpmnFile)
         {
-            var encoding = Encoding.UTF8; // or any other encoding you prefer
+            var encoding = Encoding.UTF8;
             var bytes = encoding.GetBytes(bpmnFile);
             var deployResponse = await _zeebeClient.NewDeployCommand()
                 .AddResourceString(bpmnFile, encoding, "process.bpmn")
@@ -62,6 +70,7 @@ namespace Services
             await Task.Run(CreateHelloWorker);
             await Task.Run(CreateApprovalEmailWorker);
             await Task.Run(CreateRejectionEmailWorker);
+            await Task.Run(CreateGetInterviewerWorker);
         }
 
         public void CreateHelloWorker()
@@ -85,15 +94,17 @@ namespace Services
                 try
                 {
                     Console.WriteLine("APPROVAL EMAIL WORKER - STARTING JOB");
-                    var data = JsonConvert.DeserializeObject<InterviewDataDTO>(job.Variables);
+                    JObject jsonObject = JObject.Parse(job.Variables);
 
-                    var email = data.Email;
-                    var name = data.Name;
+                    string email = (string)jsonObject["email"];
+                    string name = (string)jsonObject["name"];
+                    string interviewer = (string)jsonObject["interviewer"];
+
                     var subject = "Resposta entrevista emprego";
-                    var body = "O/A senhor(a) " + name + " foi aceite!";
+                    var body = $"O/A senhor(a) {name} foi aceite!\nO/A entrevistador(a) responsável foi {interviewer}.";
 
                     // Send email using the extracted variables
-                    await SendEmail(email, subject, body);
+                    await SendEmail(email, subject, interviewer, body);
 
                     // Complete the job
                     await client.NewCompleteJobCommand(job.Key)
@@ -119,17 +130,19 @@ namespace Services
 
                     Console.WriteLine($"Job with key {job.Key}");
 
+                    JObject jsonObject = JObject.Parse(job.Variables);
+
+                    string email = (string)jsonObject["email"];
+                    string name = (string)jsonObject["name"];
+                    string interviewer = (string)jsonObject["interviewer"];
 
                     Console.WriteLine("REJECTION EMAIL WORKER - STARTING JOB");
-                    var data = JsonConvert.DeserializeObject<InterviewDataDTO>(job.Variables);
-
-                    var email = data.Email;
-                    var name = data.Name;
+                  
                     var subject = "Resposta entrevista emprego";
-                    var body = "O/A senhor(a) " + name + " foi rejeitado!";
+                    var body = $"O/A senhor(a) {name} foi rejeitado!\nO/A entrevistador(a) responsável foi {interviewer}.";
 
                     // Send email using the extracted variables
-                    await SendEmail(email, subject, body);
+                    await SendEmail(email, subject, interviewer, body);
 
                     // Complete the job
                     await client.NewCompleteJobCommand(job.Key)
@@ -144,7 +157,7 @@ namespace Services
             });
         }
 
-        private async Task SendEmail(string email, string subject, string body)
+        private async Task SendEmail(string email, string subject, string interviewer, string body)
         {
             try
             {
@@ -170,6 +183,63 @@ namespace Services
             }
         }
 
+        public void CreateGetInterviewerWorker()
+        {
+            Console.WriteLine("CREATED GET INTERVIEWER");
+            CreateWorker("get-interviewer", async (client, job) =>
+            {
+                // Retrieve email parameter from the job payload
+                JObject jsonObject = JObject.Parse(job.Variables);
+
+                // Check if the email property exists in the jsonObject
+                if (jsonObject["email"] != null)
+                {
+                    string email = (string)jsonObject["email"];
+
+                    // Query the database infrastructure to get the interviewer by email
+                    string interviewer = await _dbInfrastructure.GetInterviewerByEmailAsync(email);
+
+                    if (!string.IsNullOrEmpty(interviewer))
+                    {
+                        Console.WriteLine($"Interviewer found: {interviewer}");
+
+                        // Create a dictionary with the interviewer variable
+                        Dictionary<string, string> interviewr = new Dictionary<string, string>
+                        {
+                    { "interviewer", interviewer }
+                        };
+
+                        // Complete the job with the interviewer variable
+                        await client.NewCompleteJobCommand(job.Key)
+                                    .Variables(JsonConvert.SerializeObject(interviewr))
+                                    .Send();
+                    }
+                    else
+                    {
+                        Console.WriteLine("Interviewer not found.");
+
+                        // Create a dictionary with an empty interviewer variable
+                        Dictionary<string, string> interviewr = new Dictionary<string, string>
+                        {
+                    { "interviewer", string.Empty }
+                        };
+
+                        // Complete the job with the empty interviewer variable
+                        await client.NewCompleteJobCommand(job.Key)
+                                    .Variables(JsonConvert.SerializeObject(interviewr))
+                                    .Send();
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("Email property not found in the payload.");
+                    // Handle the case where the email property is missing in the payload
+                }
+            });
+        }
+
+
+
 
         public void CreateWorker(string jobType, JobHandler handleJob)
         {
@@ -187,14 +257,18 @@ namespace Services
     }
 }
 
-public class InterviewDataDTO
+// Interface for the database infrastructure
+public interface IDatabaseInfrastructure
 {
-    public string Name { get; set; }
-    public string Age { get; set; }
-    public string Email { get; set; }
+    Task<string> GetInterviewerByEmailAsync(string email);
 }
 
-public class AprovalDTO
+// Mock implementation of the database infrastructure class
+public class MockDatabaseInfrastructure : IDatabaseInfrastructure
 {
-    public string Aprovado { get; set; }
+    public async Task<string> GetInterviewerByEmailAsync(string email)
+    {
+        // For demonstration purposes, let's return a mock interviewer name
+        return await Task.FromResult("John Doe");
+    }
 }
